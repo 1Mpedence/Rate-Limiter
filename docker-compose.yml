@@ -1,0 +1,53 @@
+x-app: &app
+  build: .
+  image: rate-limiter-app
+  depends_on:
+    - redis
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  app1:
+    <<: *app
+    environment:
+      REDIS_HOST: redis
+      INSTANCE_ID: app1
+      FAIL_OPEN: ${FAIL_OPEN:-true}
+
+  app2:
+    <<: *app
+    environment:
+      REDIS_HOST: redis
+      INSTANCE_ID: app2
+      FAIL_OPEN: ${FAIL_OPEN:-true}
+
+  app3:
+    <<: *app
+    environment:
+      REDIS_HOST: redis
+      INSTANCE_ID: app3
+      FAIL_OPEN: ${FAIL_OPEN:-true}
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - app1
+      - app2
+      - app3
+
+  k6:
+    image: grafana/k6:latest
+    profiles: ["benchmark"]
+    environment:
+      BASE_URL: http://nginx
+    volumes:
+      - ./benchmarks:/benchmarks
+    depends_on:
+      - nginx
