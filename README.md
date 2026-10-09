@@ -3,7 +3,7 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-brightgreen)
 ![Redis](https://img.shields.io/badge/Redis-7-red)
 
-A distributed, tier-aware rate limiter backed by Redis. Three algorithms behind a unified interface, atomic operations via Lua scripts, horizontally scalable behind nginx, rules changeable at runtime with no restart.
+A distributed, tier-aware rate limiter backed by Redis, featuring three algorithms behind a unified interface, atomic operations using Lua scripts, horizontal scalability behind NGINX, and runtime rule updates without requiring a restart.
 
 ## Why I built this
 
@@ -26,8 +26,8 @@ I also wanted to understand the algorithm tradeoffs firsthand rather than just m
 
 ```
 Client → nginx (round-robin) → app1 ┐
-                              → app2 ├──→ Redis (counters + rules)
-                              → app3 ┘
+                             → app2 ├──→ Redis (counters + rules)
+                             → app3 ┘
 ```
 
 Three identical Spring Boot instances, all stateless. Every rate limit decision including reading the rule and updating the counter happens inside Redis as a single atomic Lua script. The apps hold no counters and share no JVM state.
@@ -52,7 +52,7 @@ Request → RateLimitInterceptor
 | Allows bursts? | Yes, by design | At window boundary | No |
 | Best for | General APIs, bursty but fair traffic | Cheap rough limits | Strict limits on expensive operations |
 
-If you don't have a specific reason to choose otherwise, token bucket is the right default. It handles realistic traffic patterns well and the math is exact. Fixed window is a common mistake it lets a user make 2× the limit by timing requests across a window boundary. Sliding window log is the most correct but stores every request timestamp, which gets expensive if limits are high.
+If you don't have a specific reason to choose otherwise, token bucket is the right default. It handles realistic traffic patterns well and the math is exact. Fixed window lets a user make 2× the limit by timing requests across a window boundary. Sliding window log is the most correct but stores every request timestamp, which gets expensive if limits are high.
 
 ## Quick start
 
@@ -112,7 +112,7 @@ curl -X PUT -H "Content-Type: application/json" \
   localhost:8080/admin/rules/PREMIUM/search
 ```
 
-Change takes effect immediately on all three instances rules live in Redis, not in app memory.
+Rule changes take effect immediately across all three instances because Redis serves as the single source of truth.
 
 Tiers: `FREE`, `PREMIUM`. APIs: `search`, `export`. Algorithms: `bucket`, `fixed`, `sliding`.
 
@@ -140,7 +140,7 @@ Fill results into `BENCHMARKS.md` after running. Report throughput and p99 from 
 
 ### Why Lua in Redis and not Java locks?
 
-`synchronized` and `ReentrantLock` only protect state inside one JVM. With three instances behind nginx, a Java lock does nothing the other two instances don't know it exists.
+`synchronized` and `ReentrantLock` only protect state inside one JVM. With three instances behind nginx, a Java lock cannot coordinate access across instances because the other two instances are unaware of it.
 
 The lock needs to live in shared state. Redis executes Lua scripts atomically: the entire script runs as a single uninterruptible operation no matter how many clients are connected. It gives the same guarantee as a `synchronized` block, except the lock is in Redis, which all instances share.
 
