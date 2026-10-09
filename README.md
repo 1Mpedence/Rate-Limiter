@@ -9,16 +9,16 @@ A distributed, tier-aware rate limiter backed by Redis. Three algorithms behind 
 
 Rate limiters are one of those components that look simple until you try to build one correctly. The interesting problems show up fast: how do you keep a counter consistent when three instances of your service are running behind a load balancer? How do you avoid race conditions without locking in Java (which only works inside one JVM)? And what does "fair" actually mean when one user is bursty and another is steady?
 
-I also wanted to understand the algorithm tradeoffs firsthand rather than just memorising them. Token bucket's lazy refill math, fixed window's boundary problem, sliding window log's memory cost — these only stick when you implement them.
+I also wanted to understand the algorithm tradeoffs firsthand rather than just memorising them. Token bucket's lazy refill math, fixed window's boundary problem, sliding window log's memory cost these only stick when you implement them.
 
 ## Features
 
 - 3 algorithms: token bucket, fixed window, sliding window log
-- Tier-based limits — FREE and PREMIUM users get different quotas per API
-- All state in Redis, atomic via Lua — race conditions across instances are impossible
+- Tier-based limits FREE and PREMIUM users get different quotas per API
+- All state in Redis, atomic via Lua race conditions across instances are impossible
 - Admin REST API for runtime rule changes, no service restart needed
 - Configurable fail-open / fail-closed behaviour when Redis is unreachable
-- Runs with `docker compose up` — nginx in front, three app copies behind it, one Redis
+- Runs with `docker compose up` nginx in front, three app copies behind it, one Redis
 - JUnit + Testcontainers test suite
 - k6 benchmark suite included
 
@@ -30,7 +30,7 @@ Client → nginx (round-robin) → app1 ┐
                               → app3 ┘
 ```
 
-Three identical Spring Boot instances, all stateless. Every rate limit decision — including reading the rule and updating the counter — happens inside Redis as a single atomic Lua script. The apps hold no counters and share no JVM state.
+Three identical Spring Boot instances, all stateless. Every rate limit decision including reading the rule and updating the counter happens inside Redis as a single atomic Lua script. The apps hold no counters and share no JVM state.
 
 Request flow:
 
@@ -47,12 +47,12 @@ Request → RateLimitInterceptor
 
 | | Token bucket | Fixed window | Sliding window log |
 |---|---|---|---|
-| Memory per user | O(1) — 2 numbers | O(1) — 2 values | O(N) — 1 entry per request |
+| Memory per user | O(1) 2 numbers | O(1) 2 values | O(N) 1 entry per request |
 | Accuracy | Good | Rough (2x burst at boundary) | Exact |
 | Allows bursts? | Yes, by design | At window boundary | No |
 | Best for | General APIs, bursty but fair traffic | Cheap rough limits | Strict limits on expensive operations |
 
-If you don't have a specific reason to choose otherwise, token bucket is the right default. It handles realistic traffic patterns well and the math is exact. Fixed window is a common mistake — it lets a user make 2× the limit by timing requests across a window boundary. Sliding window log is the most correct but stores every request timestamp, which gets expensive if limits are high.
+If you don't have a specific reason to choose otherwise, token bucket is the right default. It handles realistic traffic patterns well and the math is exact. Fixed window is a common mistake it lets a user make 2× the limit by timing requests across a window boundary. Sliding window log is the most correct but stores every request timestamp, which gets expensive if limits are high.
 
 ## Quick start
 
@@ -87,24 +87,24 @@ X-RateLimit-Remaining: 0
 ### Rate-limited endpoints
 
 ```
-GET /api/search   — limited by tier, token bucket by default
-GET /api/export   — limited by tier, sliding window by default
+GET /api/search   limited by tier, token bucket by default
+GET /api/export   limited by tier, sliding window by default
 ```
 
 Headers on every response:
-- `X-RateLimit-Limit` — the limit that applies
-- `X-RateLimit-Remaining` — how many are left right now
-- `Retry-After` (429 only) — seconds to wait before retrying
-- `X-Served-By` — which app instance answered
+- `X-RateLimit-Limit` the limit that applies
+- `X-RateLimit-Remaining` how many are left right now
+- `Retry-After` (429 only) seconds to wait before retrying
+- `X-Served-By` which app instance answered
 
 ### Admin
 
 ```
-GET  /admin/rules              — list all current rules
-PUT  /admin/rules/{tier}/{api} — update a rule at runtime
+GET  /admin/rules              list all current rules
+PUT  /admin/rules/{tier}/{api} update a rule at runtime
 ```
 
-Example — raise the PREMIUM search limit to 500 per minute:
+Example raise the PREMIUM search limit to 500 per minute:
 
 ```bash
 curl -X PUT -H "Content-Type: application/json" \
@@ -112,7 +112,7 @@ curl -X PUT -H "Content-Type: application/json" \
   localhost:8080/admin/rules/PREMIUM/search
 ```
 
-Change takes effect immediately on all three instances — rules live in Redis, not in app memory.
+Change takes effect immediately on all three instances rules live in Redis, not in app memory.
 
 Tiers: `FREE`, `PREMIUM`. APIs: `search`, `export`. Algorithms: `bucket`, `fixed`, `sliding`.
 
@@ -140,7 +140,7 @@ Fill results into `BENCHMARKS.md` after running. Report throughput and p99 from 
 
 ### Why Lua in Redis and not Java locks?
 
-`synchronized` and `ReentrantLock` only protect state inside one JVM. With three instances behind nginx, a Java lock does nothing — the other two instances don't know it exists.
+`synchronized` and `ReentrantLock` only protect state inside one JVM. With three instances behind nginx, a Java lock does nothing the other two instances don't know it exists.
 
 The lock needs to live in shared state. Redis executes Lua scripts atomically: the entire script runs as a single uninterruptible operation no matter how many clients are connected. It gives the same guarantee as a `synchronized` block, except the lock is in Redis, which all instances share.
 
@@ -176,24 +176,24 @@ mvn test
 
 Requires Docker (Testcontainers starts its own Redis container).
 
-**Integration tests** (`RateLimiterIntegrationTest`) — real Redis, real HTTP, concurrent threads:
+**Integration tests** (`RateLimiterIntegrationTest`) real Redis, real HTTP, concurrent threads:
 - Burst of 200 concurrent requests never gets more than the limit through, all three algorithms
 - Counters are isolated per user, per API, per tier
 - Requests are allowed again after the window expires
 - Rejected responses carry `Retry-After`; allowed responses carry `X-RateLimit-*` headers
 
-**Unit tests** (`RateLimitServiceTest`, `RateLimitInterceptorTest`) — Mockito, no Redis needed:
+**Unit tests** (`RateLimitServiceTest`, `RateLimitInterceptorTest`) Mockito, no Redis needed:
 - Algorithm selection and unknown-algorithm error path
 - Fail-open and fail-closed behaviour under Redis failure
 - Invalid tier header, missing user ID, `Retry-After` rounding
 
 ## What I'd add in v2
 
-- **Admin authentication** — right now any caller who can reach port 8080 can rewrite limits. HTTP Basic Auth at minimum, a proper API key in production.
-- **Prometheus metrics** — a counter on allowed/rejected per (tier, api, algorithm) would make this observable. Micrometer is already on the classpath via Actuator.
-- **Local rule cache** — rules are read from Redis on every request. A short in-memory cache (5–10 second TTL) would cut that round trip. The tradeoff is rule changes take a moment to propagate.
-- **Redis cluster** — single Redis is a single point of failure. Replicas for reads, cluster for writes.
-- **Sliding window counter** — an approximate sliding window that uses two fixed-window counters and linear interpolation. Same O(1) memory as fixed window, much better accuracy. Worth it if the sorted-set memory cost of the log becomes a problem.
+- **Admin authentication** right now any caller who can reach port 8080 can rewrite limits. HTTP Basic Auth at minimum, a proper API key in production.
+- **Prometheus metrics** a counter on allowed/rejected per (tier, api, algorithm) would make this observable. Micrometer is already on the classpath via Actuator.
+- **Local rule cache** rules are read from Redis on every request. A short in-memory cache (5–10 second TTL) would cut that round trip. The tradeoff is rule changes take a moment to propagate.
+- **Redis cluster** single Redis is a single point of failure. Replicas for reads, cluster for writes.
+- **Sliding window counter** an approximate sliding window that uses two fixed-window counters and linear interpolation. Same O(1) memory as fixed window, much better accuracy. Worth it if the sorted-set memory cost of the log becomes a problem.
 
 ## Project layout
 
